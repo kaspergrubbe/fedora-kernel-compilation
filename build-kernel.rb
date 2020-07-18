@@ -107,9 +107,45 @@ Dir.chdir("tmpkernel") do
   run_command("make prepare")
 end
 
+# BUILD ZFS
+# -----------------------------------------------------------------------------
+unless Dir.exists?("zfs")
+  run_command("git clone https://github.com/zfsonlinux/zfs")
+end
+
+Dir.chdir("zfs") do
+  run_command("git clean -fx")
+  run_command("git checkout master")
+  run_command("git pull")
+  _, tags, _ = run_command("git tag --list")
+  tags = tags.split("\n")
+
+  # Get rid of "rc" releases
+  # tags = tags.reject{|t| t.include?("-rc")}
+
+  # Set tag
+  tag = "zfs-0.8.4"
+
+  puts "Building on top of #{tag} (https://github.com/openzfs/zfs/releases/tag/#{tag})"
+  run_command("git checkout #{tag}")
+  run_command("sh autogen.sh")
+
+  configure = [
+    "./configure",
+    "--enable-linux-builtin",
+    "--with-linux=../tmpkernel",
+    "--with-linux-obj=../tmpkernel",
+  ]
+  run_command(configure.join(" "))
+  run_command("./copy-builtin ../tmpkernel")
+end
+
 # BUILD KERNEL
 # -----------------------------------------------------------------------------
 Dir.chdir("tmpkernel") do
+  File.open(".config", "a") do |f|
+    f.write("CONFIG_ZFS=y")
+  end
   run_command("sed -i \"s/CONFIG_USB_XHCI_HCD=y/CONFIG_USB_XHCI_HCD=m/\" .config")
   run_command("sed -i \"s/CONFIG_USB_XHCI_PCI=y/CONFIG_USB_XHCI_PCI=m/\" .config")
 
@@ -117,6 +153,7 @@ Dir.chdir("tmpkernel") do
   run_command("make ARCH=x86_64 oldconfig")
 
   config = File.open(".config").read
+  raise "CONFIG_ZFS=y not found in .config" unless config.include?("CONFIG_ZFS=y")
   raise "CONFIG_USB_XHCI_HCD=m not found in .config" unless config.include?("CONFIG_USB_XHCI_HCD=m")
   raise "CONFIG_USB_XHCI_PCI=m not found in .config" unless config.include?("CONFIG_USB_XHCI_PCI=m")
 
