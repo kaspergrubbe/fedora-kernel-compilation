@@ -6,9 +6,9 @@ KERNEL_TAG = 'KAWGRR'
 KERNEL_NUMBER = '10013'
 
 # https://github.com/openzfs/zfs/releases
-ZFS_VERSION = '2.2.1'
+ZFS_VERSION = '2.2.0'
 # Check kernel versions at: https://kernel.org
-ZFS_SUPPORTED_KERNEL = '6.6'
+ZFS_SUPPORTED_KERNEL = '6.1'
 
 # Building custom kernels for Fedora with help from:
 # - https://fedoraproject.org/wiki/Building_a_custom_kernel
@@ -94,6 +94,9 @@ Dir.chdir('kernel-ark') do
   # Get rid of "eln" releases
   tags = tags.reject { |t| t.end_with?('.eln') }
 
+  # Get rid of known bads
+  tags = tags.reject { |t| t == 'kernel-6.5.11-0' }
+
   # Grab latest tag
   version_capture = /\Akernel-(\d+.\d+.\d+-\d{1,3})\z/
   tag = tags.grep(version_capture).max_by do |version|
@@ -164,8 +167,7 @@ Dir.chdir('tmpkernel') do
     'CONFIG_VFIO=m',
     'CONFIG_VFIO_IOMMU_TYPE1=m',
     'CONFIG_VFIO_PCI=m',
-    # 'CONFIG_VFIO_VIRQFD=m',
-    'CONFIG_VFIO_VIRQFD=y', # 6.1 and newer
+    'CONFIG_VFIO_VIRQFD=m',
     'CONFIG_KVM=y',
     'CONFIG_KVM_INTEL=y',
     'CONFIG_ZFS=y',
@@ -173,7 +175,6 @@ Dir.chdir('tmpkernel') do
     'CONFIG_USB_XHCI_PCI=m',
     'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y'
   ]
-
 
   config_options.each do |config_option|
     if config.include?(config_option)
@@ -208,13 +209,11 @@ Dir.chdir('tmpkernel') do
   puts
 
   puts "Building kernel #{KERNEL_TAG}-#{KERNEL_NUMBER}"
+  run_command("make bzImage ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER}")
   # run_command("make bzImage ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
   # run_command("make modules ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
+  run_command("make modules ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER}")
   #  run_command("make binrpm-pkg EXTRAVERSION=-#{kernel_tag} LOCALVERSION=-#{kernel_number} -j `nproc`")
-
-  run_command("rpmdev-setuptree")
-  # run_command("dnf -y builddep")
-  run_command("make binrpm-pkg  ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
 end
 
 # FINALIZE
@@ -234,3 +233,4 @@ puts 'sudo make install'
 # puts "grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg"
 
 # dracut --force --no-hostonly
+
