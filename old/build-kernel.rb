@@ -1,12 +1,14 @@
+# frozen_string_literal: true
+
 require 'bundler/inline'
 
 KERNEL_TAG = 'KAWGRR'
-KERNEL_NUMBER = '1002'
+KERNEL_NUMBER = '10013'
 
 # https://github.com/openzfs/zfs/releases
-ZFS_VERSION = '2.2.7'
+ZFS_VERSION = '2.2.1'
 # Check kernel versions at: https://kernel.org
-ZFS_SUPPORTED_KERNEL = '6.12'
+ZFS_SUPPORTED_KERNEL = '6.6'
 
 # Building custom kernels for Fedora with help from:
 # - https://fedoraproject.org/wiki/Building_a_custom_kernel
@@ -18,12 +20,12 @@ gemfile do
   gem 'rb-readline'
 end
 
-puts 'Gems locked and loaded!'
+puts 'Gems installed and loaded!'
 
 require 'open3'
 
 def run_command(command, input = nil, allowed_exit_codes = [0])
-  process, status, stdout, stderr = Open3.popen3(command) do |stdin, stdout, stderr, wait_thread|
+  _, status, stdout, stderr = Open3.popen3(command) do |stdin, stdout, stderr, wait_thread|
     stdin.puts(input) if input
     stdin.close
 
@@ -62,6 +64,14 @@ def run_command(command, input = nil, allowed_exit_codes = [0])
   [status, stdout.strip, stderr.strip]
 end
 
+# FIND CURRENT FEDORA RELEASE
+# -----------------------------------------------------------------------------
+# os_release = File.open("/etc/os-release").read
+# raise "No VERSION_ID in /etc/os-release" unless os_release.include?("VERSION_ID")
+# fedora_release = os_release.tap do |it|
+#   break "fc" + it.split("\n").select{|variable| variable.start_with?("VERSION_ID=")}.first.split("=").last
+# end
+
 # FETCH EXPLODED FEDORA KERNEL TREE
 # -----------------------------------------------------------------------------
 run_command('git clone https://gitlab.com/cki-project/kernel-ark.git') unless Dir.exist?('kernel-ark')
@@ -81,14 +91,14 @@ Dir.chdir('kernel-ark') do
   # Get rid of "elrdy" releases
   tags = tags.reject { |t| t.include?('.elrdy') }
 
-  # Get rid of "fc33" releases
-  tags = tags.reject { |t| t.include?('.fc33') }
+  # Get rid of "eln" releases
+  tags = tags.reject { |t| t.end_with?('.eln') }
 
   # Grab latest tag
   version_capture = /\Akernel-(\d+.\d+.\d+-\d{1,3})\z/
-  tag = tags.grep(version_capture).sort_by do |version|
+  tag = tags.grep(version_capture).max_by do |version|
     Gem::Version.new(version.match(version_capture).captures.first)
-  end.last
+  end
   raise 'No tag found' unless tag
 
   # Pick the last version
@@ -125,7 +135,7 @@ Dir.chdir('zfs') do
   tags = tags.split("\n")
 
   # Get rid of "rc" releases
-  tags = tags.reject { |t| t.include?('-rc') }
+  tags.reject { |t| t.include?('-rc') }
 
   # Set tag
   tag = "zfs-#{ZFS_VERSION}"
@@ -154,13 +164,16 @@ Dir.chdir('tmpkernel') do
     'CONFIG_VFIO=m',
     'CONFIG_VFIO_IOMMU_TYPE1=m',
     'CONFIG_VFIO_PCI=m',
-    'CONFIG_VFIO_VIRQFD=y',
+    # 'CONFIG_VFIO_VIRQFD=m',
+    'CONFIG_VFIO_VIRQFD=y', # 6.1 and newer
     'CONFIG_KVM=y',
     'CONFIG_KVM_INTEL=y',
     'CONFIG_ZFS=y',
     'CONFIG_USB_XHCI_HCD=m',
-    'CONFIG_USB_XHCI_PCI=m'
+    'CONFIG_USB_XHCI_PCI=m',
+    'CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y'
   ]
+
 
   config_options.each do |config_option|
     if config.include?(config_option)
@@ -197,28 +210,21 @@ Dir.chdir('tmpkernel') do
   puts "Building kernel #{KERNEL_TAG}-#{KERNEL_NUMBER}"
   # run_command("make bzImage ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
   # run_command("make modules ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
-  run_command("make binrpm-pkg EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
-end
+  #  run_command("make binrpm-pkg EXTRAVERSION=-#{kernel_tag} LOCALVERSION=-#{kernel_number} -j `nproc`")
 
-kernel_rpm = Dir.glob('tmpkernel/rpmbuild/RPMS/x86_64/*.rpm').select do |e|
-  File.file? e
-end.select { |f| f =~ %r{/kernel-\d+\.\d+} }.first
+  run_command("rpmdev-setuptree")
+  # run_command("dnf -y builddep")
+  run_command("make binrpm-pkg  ARCH=x86_64 EXTRAVERSION=-#{KERNEL_TAG} LOCALVERSION=-#{KERNEL_NUMBER} -j `nproc`")
+end
 
 # FINALIZE
 # -----------------------------------------------------------------------------
 puts 'The kernel is now built, you can install it by typing:'
-puts "$ rpm -ivh #{kernel_rpm}"
 puts
-
-status, installed_rpms, = run_command('rpm -qa | grep KAWGRR', nil, [0, 1])
-if status.zero?
-  puts 'Installed kernels:'
-  installed_rpms.lines.each do |kernel|
-    puts "#{kernel}"
-  end
-  puts
-  puts 'You can delete them by typing: rpm -e PACKAGE_NAME'
-end
+puts 'cd tmpkernel'
+puts 'sudo make modules_install'
+puts 'sudo make install'
+# sudo cp arch/x86_64/boot/bzImage /boot/
 
 # $ sudo grubby --set-default /boot/vmlinuz-5.4.1
 # You can confirm the details with the following commands:
