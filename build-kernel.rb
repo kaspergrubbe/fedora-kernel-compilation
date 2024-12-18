@@ -220,6 +220,11 @@ if status.zero?
   puts 'You can delete them by typing: rpm -e PACKAGE_NAME'
 end
 
+unless File.exist?('/etc/dkms/no-autoinstall')
+  puts
+  puts "/etc/dkms/no-autoinstall doesn't exist, you should consider creating it"
+end
+
 # $ sudo grubby --set-default /boot/vmlinuz-5.4.1
 # You can confirm the details with the following commands:
 # grubby --info=ALL | more
